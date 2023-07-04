@@ -14,6 +14,7 @@
 #include "components/ble/NotificationManager.h"
 #include "components/datetime/DateTimeController.h"
 #include "systemtask/SystemTask.h"
+#include "components/ble/BleNus.h"
 
 using namespace Pinetime::Controllers;
 
@@ -23,7 +24,8 @@ NimbleController::NimbleController(Pinetime::System::SystemTask& systemTask,
                                    Pinetime::Controllers::NotificationManager& notificationManager,
                                    Controllers::Battery& batteryController,
                                    Pinetime::Drivers::SpiNorFlash& spiNorFlash,
-                                   Controllers::HeartRateController& heartRateController)
+                                   Controllers::HeartRateController& heartRateController,
+                                   Controllers::MotionController& motionController)
   : systemTask {systemTask},
     bleController {bleController},
     dateTimeController {dateTimeController},
@@ -39,6 +41,7 @@ NimbleController::NimbleController(Pinetime::System::SystemTask& systemTask,
     batteryInformationService {batteryController},
     immediateAlertService {systemTask, notificationManager},
     heartRateService {systemTask, heartRateController},
+    motionService{systemTask, motionController},
     serviceDiscovery({&currentTimeClient, &alertNotificationClient}) {
 }
 
@@ -72,6 +75,7 @@ void NimbleController::Init() {
   ble_svc_gatt_init();
 
   deviceInformationService.Init();
+  bleNusService.Init();
   currentTimeClient.Init();
   currentTimeService.Init();
   musicService.Init();
@@ -81,6 +85,7 @@ void NimbleController::Init() {
   batteryInformationService.Init();
   immediateAlertService.Init();
   heartRateService.Init();
+  motionService.Init();
 
   int rc;
   rc = ble_hs_util_ensure_addr(0);
@@ -178,7 +183,9 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
         connectionHandle = event->connect.conn_handle;
         bleController.Connect();
         systemTask.PushMessage(Pinetime::System::Messages::BleConnected);
-        // Service discovery is deferred via systemtask
+        connectionHandle = event->connect.conn_handle;
+        bleNusService.SetConnectionHandle(event->connect.conn_handle);
+        // Service discovery is deffered via systemtask
       }
       break;
 
@@ -215,6 +222,19 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
                    event->subscribe.prev_notify,
                    event->subscribe.cur_notify,
                    event->subscribe.prev_indicate);
+
+      if(event->subscribe.reason == BLE_GAP_SUBSCRIBE_REASON_TERM) {
+        heartRateService.UnsubscribeNotification(event->subscribe.conn_handle, event->subscribe.attr_handle);
+        motionService.UnsubscribeNotification(event->subscribe.conn_handle, event->subscribe.attr_handle);
+      }
+      else if(event->subscribe.prev_notify == 0 && event->subscribe.cur_notify == 1) {
+        heartRateService.SubscribeNotification(event->subscribe.conn_handle, event->subscribe.attr_handle);
+        motionService.SubscribeNotification(event->subscribe.conn_handle, event->subscribe.attr_handle);
+      }
+      else if(event->subscribe.prev_notify == 1 && event->subscribe.cur_notify == 0) {
+        heartRateService.UnsubscribeNotification(event->subscribe.conn_handle, event->subscribe.attr_handle);
+        motionService.UnsubscribeNotification(event->subscribe.conn_handle, event->subscribe.attr_handle);
+      }
       break;
 
     case BLE_GAP_EVENT_MTU:
@@ -276,3 +296,4 @@ void NimbleController::NotifyBatteryLevel(uint8_t level) {
     batteryInformationService.NotifyBatteryLevel(connectionHandle, level);
   }
 }
+

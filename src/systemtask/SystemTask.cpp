@@ -28,6 +28,13 @@
 
 #include <memory>
 
+#include <libraries/log/nrf_log_backend_interface.h>
+#include <libraries/log/src/nrf_log_backend_serial.h>
+#include <libraries/log/nrf_log.h>
+#include <libraries/log/nrf_log_ctrl.h>
+#include <libraries/log/nrf_log_default_backends.h>
+
+
 using namespace Pinetime::System;
 
 namespace {
@@ -99,9 +106,11 @@ SystemTask::SystemTask(Drivers::SpiMaster& spi,
     motionController {motionController},
     displayApp {displayApp},
     heartRateApp(heartRateApp),
-    fs {fs},
+    fs{fs},
     touchHandler {touchHandler},
-    nimbleController(*this, bleController, dateTimeController, notificationManager, batteryController, spiNorFlash, heartRateController) {
+    nimbleController(*this, bleController, dateTimeController, notificationManager, batteryController, spiNorFlash, heartRateController, motionController),
+    console(*this, nimbleController, fs, lvgl, motorController, touchPanel, spiNorFlash, twiMaster, motionController) {
+      
 }
 
 void SystemTask::Start() {
@@ -161,6 +170,8 @@ void SystemTask::Work() {
   heartRateSensor.Init();
   heartRateSensor.Disable();
   heartRateApp.Start();
+
+  console.Init();
 
   // Button
   nrf_gpio_cfg_output(15);
@@ -364,6 +375,10 @@ void SystemTask::Work() {
           break;
         case Messages::BatteryPercentageUpdated:
           nimbleController.NotifyBatteryLevel(batteryController.PercentRemaining());
+          break;
+
+        case Messages::ConsoleProcess:
+          console.Process();
           break;
 
         default:
